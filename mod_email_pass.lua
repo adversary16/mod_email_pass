@@ -7,6 +7,7 @@ local vcard = module:require "vcard";
 local datetime = require "util.datetime";
 local timer = require "util.timer";
 local jidutil = require "util.jid";
+local ssl = require "ssl";
 
 -- SMTP related params. Readed from config
 local os_time = os.time;
@@ -14,13 +15,14 @@ local smtp = require "socket.smtp";
 local smtp_server = module:get_option_string("smtp_server", "localhost");
 local smtp_port = module:get_option_string("smtp_port", "25");
 local smtp_ssl = module:get_option_boolean("smtp_ssl", false);
+local smtp_tls_version = module:get_option_string('smtp_tls_version', 'tlsv1_2');
 local smtp_user = module:get_option_string("smtp_username");
 local smtp_pass = module:get_option_string("smtp_password");
 local smtp_address = module:get_option("smtp_from") or ((smtp_user or "no-responder").."@"..(smtp_server or module.host));
 local mail_subject = module:get_option_string("msg_subject")
 local mail_body = module:get_option_string("msg_body");
 local url_path = module:get_option_string("url_path", "/resetpass");
-
+local password_length_min = tonumber(module:get_option_string("password_length_min", 5), 10);
 
 -- This table has the tokens submited by the server
 tokens_mails = {};
@@ -40,7 +42,7 @@ function enablessl()
         connect = function(_, host, port)
             local r, e = sock:connect(host, port)
             if not r then return r, e end
-            sock = ssl.wrap(sock, {mode='client', protocol='tlsv1'})
+            sock = ssl.wrap(sock, {mode='client', protocol=smtp_tls_version})
             return sock:dohandshake()
         end
     }, {
@@ -68,23 +70,23 @@ local function render(template, data)
 	return tostring(template.apply(data));
 end
 
-function send_email(address, smtp_address, message_text, subject)
+function send_email(address, smtp_address, message_text, subject, jid)
 	local rcpt = "<"..address..">";
-
+	print(jid)
 	local mesgt = {
 		headers = {
 			to = address;
-			subject = subject or ("Jabber password reset "..jid_bare(from_address));
+			subject = subject or ("Jabber password reset " .. jidutil.bare(jid));
 		};
 		body = message_text;
 	};
 	local ok, err = nil;
 
 	if not smtp_ssl then
-		ok, err = smtp.send{ from = smtp_address, rcpt = rcpt, source = smtp.message(mesgt),
+		ok, err = smtp.send{ from = smtp_user, rcpt = rcpt, source = smtp.message(mesgt),
 		        server = smtp_server, user = smtp_user, password = smtp_pass, port = 25 };
 	else
-		ok, err = smtp.send{ from = smtp_address, rcpt = rcpt, source = smtp.message(mesgt),
+		ok, err = smtp.send{ from = smtp_user, rcpt = rcpt, source = smtp.message(mesgt),
                 server = smtp_server, user = smtp_user, password = smtp_pass, port = smtp_port, create = enablessl };
 	end
 
@@ -212,7 +214,7 @@ function generateUrl(token)
 		url = url .. ":" .. http_port[1];
 	end
 
-	url = url .. url_path .. "token.html?" .. token;
+	url = url .. url_path .. "/token.html?" .. token;
 
 	return url;
 end
@@ -230,32 +232,32 @@ function send_token_mail(form, origin)
 	local jid = prepped_username .. "@" .. module.host;
 
     if not prepped_username then
-    	return nil, "El usuario contiene caracteres incorrectos";
+    	return nil, "Username contains restricted characters";
     end
     if #prepped_username == 0 then
-    	return nil, "El campo usuario está vacio";
+    	return nil, "Username can't be blank";
     end
     if not usermanager.user_exists(prepped_username, module.host) then
-    	return nil, "El usuario NO existe";
+    	return nil, "User does not exist";
     end
 
 	if #prepped_mail == 0 then
-    	return nil, "El campo email está vacio";
+    	return nil, "Email can't be blank";
     end
 
 	local vcarduser = get_user_vcard(prepped_username, module.host);
 
 	if not vcarduser then
-		return nil, "User has not vCard";
+		return nil, "This user doesn't have a vCard";
 	else
 		if not vcarduser.EMAIL then
-			return nil, "Esa cuente no tiene ningún email configurado en su vCard";
+			return nil, "This user's vCard does not contain any email addresses";
 		end
 
 		email = string.lower(vcarduser.EMAIL[1]);
 
 		if email ~= string.lower(prepped_mail) then
-			return nil, "Dirección eMail incorrecta";
+			return nil, "Email address is malformed";
 		end
 
 		-- Check if has already a valid token, not used yet.
@@ -269,7 +271,7 @@ function send_token_mail(form, origin)
 		local email_body =  render(get_template("sendtoken",".mail"), {jid = jid, url = url} );
 
 		module:log("info", "Sending password reset mail to user %s", jid);
-		send_email(email, smtp_address, email_body, mail_subject);
+		send_email(email, smtp_address, email_body, mail_subject, jid);
 		return "ok";
 	end
 
@@ -280,16 +282,16 @@ function reset_password_with_token(form, origin)
 	local password = form.newpassword;
 
 	if not token then
-		return nil, "El Token es inválido";
+		return nil, "Invalid token";
 	end
 	if not tokens_mails[token] then
-		return nil, "El Token no existe o ya fué usado";
+		return nil, "This token is either expired or does not exist";
 	end
 	if not password then
-		return nil, "La campo clave no puede estar vacio";
+		return nil, "You can't set an empty password";
 	end
-	if #password < 5 then
-		return nil, "La clave debe tener una longitud de al menos 5 caracteres";
+	if #password < password_length_min then
+		return nil, "Your password should be at least " .. password_length_min .. "characters long";
 	end
 	local jid = tokens_mails[token];
 	local user, host, resource = jidutil.split(jid);
