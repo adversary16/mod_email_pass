@@ -25,8 +25,8 @@ local url_path = module:get_option_string("url_path", "/resetpass");
 local password_length_min = tonumber(module:get_option_string("password_length_min", 5), 10);
 
 -- This table has the tokens submited by the server
-tokens_mails = {};
-tokens_expiration = {};
+local tokens_mails = {};
+local tokens_expiration = {};
 
 -- URL
 local https_host = module:get_option_string("https_host");
@@ -36,7 +36,7 @@ local http_port = module:get_option("http_ports", { 80 });
 
 local timer_repeat = 120;		-- repeat after 120 secs
 
-function enablessl()
+local function enablessl()
     local sock = socket.tcp()
     return setmetatable({
         connect = function(_, host, port)
@@ -54,7 +54,7 @@ function enablessl()
     })
 end
 
-function template(data)
+local function template(data)
 	-- Like util.template, but deals with plain text
 	return { apply = function(values) return (data:gsub("{([^}]+)}", values)); end }
 end
@@ -70,7 +70,7 @@ local function render(template, data)
 	return tostring(template.apply(data));
 end
 
-function send_email(address, smtp_address, message_text, subject, jid)
+local function send_email(address, smtp_address, message_text, subject, jid)
 	local rcpt = "<"..address..">";
 	print(jid)
 	local mesgt = {
@@ -124,7 +124,7 @@ local sendmail_success_tpl = get_template("sendmailok",".html");
 local reset_success_tpl = get_template("resetok",".html");
 local token_tpl = get_template("token",".html");
 
-function generate_page(event, display_options)
+local function generate_page(event, display_options)
 	local request = event.request;
 
 	return render(changepass_tpl, {
@@ -133,7 +133,7 @@ function generate_page(event, display_options)
 	})
 end
 
-function generate_token_page(event, display_options)
+local function generate_token_page(event, display_options)
         local request = event.request;
 
         return render(token_tpl, {
@@ -143,7 +143,7 @@ function generate_token_page(event, display_options)
         })
 end
 
-function generateToken(address)
+local function generateToken(address)
 	math.randomseed(os.time())
 	length = 16
     if length < 1 then return nil end
@@ -164,7 +164,7 @@ function generateToken(address)
 	end
 end
 
-function isExpired(token)
+local function isExpired(token)
 	if not tokens_expiration[token] then
 		return nil;
 	end
@@ -178,7 +178,7 @@ function isExpired(token)
 end
 
 -- Expire tokens
-expireTokens = function()
+local expireTokens = function()
 	for token,value in pairs(tokens_mails) do
 		if isExpired(token) then
 			module:log("info","Expiring password reset request from user '%s', not used.", tokens_mails[token]);
@@ -190,7 +190,7 @@ expireTokens = function()
 end
 
 -- Check if a user has a active token not used yet.
-function hasTokenActive(address)
+local function hasTokenActive(address)
 	for token,value in pairs(tokens_mails) do
 		if address == value and not isExpired(token) then
 			return token;
@@ -199,7 +199,7 @@ function hasTokenActive(address)
 	return nil;
 end
 
-function generateUrl(token)
+local function generateUrl(token)
 	local url;
 
 	if https_host then
@@ -219,14 +219,14 @@ function generateUrl(token)
 	return url;
 end
 
-function sendMessage(jid, subject, message)
+local function sendMessage(jid, subject, message)
   local msg = st.message({ from = module.host; to = jid; }):
 	    tag("subject"):text(subject):up():
 	    tag("body"):text(message);
   module:send(msg);
 end
 
-function send_token_mail(form, origin)
+local function send_token_mail(form, origin)
 	local prepped_username = nodeprep(form.username);
 	local prepped_mail = form.email;
 	local jid = prepped_username .. "@" .. module.host;
@@ -277,7 +277,7 @@ function send_token_mail(form, origin)
 
 end
 
-function reset_password_with_token(form, origin)
+local function reset_password_with_token(form, origin)
 	local token = form.token;
 	local password = form.newpassword;
 
@@ -304,11 +304,11 @@ function reset_password_with_token(form, origin)
 	return "ok";
 end
 
-function generate_success(event, form)
+local function generate_success(event, form)
 	return render(sendmail_success_tpl, { jid = nodeprep(form.username).."@"..module.host });
 end
 
-function generate_register_response(event, form, ok, err)
+local function generate_register_response(event, form, ok, err)
 	local message;
 	if ok then
 		return generate_success(event, form);
@@ -317,7 +317,7 @@ function generate_register_response(event, form, ok, err)
 	end
 end
 
-function handle_form_token(event)
+local function handle_form_token(event)
 	local request, response = event.request, event.response;
 	local form = http.formdecode(request.body);
 
@@ -327,11 +327,11 @@ function handle_form_token(event)
 	return true; -- Leave connection open until we respond above
 end
 
-function generate_reset_success(event, form)
+local function generate_reset_success(event, form)
         return render(reset_success_tpl, { });
 end
 
-function generate_reset_response(event, form, ok, err)
+local function generate_reset_response(event, form, ok, err)
         local message;
         if ok then
                 return generate_reset_success(event, form);
@@ -340,7 +340,7 @@ function generate_reset_response(event, form, ok, err)
         end
 end
 
-function handle_form_reset(event)
+local function handle_form_reset(event)
 	local request, response = event.request, event.response;
         local form = http.formdecode(request.body);
 
